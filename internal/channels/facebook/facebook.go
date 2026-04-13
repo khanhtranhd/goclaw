@@ -42,6 +42,14 @@ type Channel struct {
 	// firstInboxSent tracks which senders have already received a first-inbox DM (in-memory).
 	firstInboxSent sync.Map // senderID(string) → struct{}
 
+	// adminReplied tracks conversations where admin (page) sent a message recently.
+	// Bot skips auto-reply for these conversations to avoid duplicate responses.
+	adminReplied sync.Map // chatID(string) → time.Time
+
+	// botSentAt tracks when bot last sent a reply to each conversation.
+	// Used to distinguish bot replies from admin replies in Graph API checks.
+	botSentAt sync.Map // chatID(string) → time.Time
+
 	// postFetcher caches post content to enrich comment context.
 	postFetcher *PostFetcher
 
@@ -156,12 +164,44 @@ func (ch *Channel) Stop(_ context.Context) error {
 	return nil
 }
 
+// adminRepliedAfterBot checks if an admin (human) replied to this conversation
+// after the bot's last reply. Calls Graph API to get the last page message,
+// then compares its timestamp with our last bot-sent time. If the page message
+// is newer than our last send → admin replied → skip bot.
+func (ch *Channel) adminRepliedAfterBot(chatID string) bool {
+	lastPageMsg := ch.graphClient.LastPageMessageTime(ch.stopCtx, chatID)
+	if lastPageMsg.IsZero() {
+		return false // no page message found → no admin reply
+	}
+
+	// Check if we (bot) sent around that time
+	if val, ok := ch.botSentAt.Load(chatID); ok {
+		botTime := val.(time.Time)
+		// If page message is within 60s of bot send → it's our bot reply, not admin
+		if lastPageMsg.Sub(botTime).Abs() < 60*time.Second {
+			return false
+		}
+	}
+
+	// Page message exists and doesn't match our bot send time → admin replied
+	slog.Debug("facebook: admin reply detected via Graph API",
+		"chat_id", chatID, "page_msg_time", lastPageMsg.Format(time.RFC3339))
+	return true
+}
+
 // Send delivers an outbound message. Dispatches to comment reply or Messenger based on fb_mode metadata.
 func (ch *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	mode := msg.Metadata["fb_mode"]
 
 	switch mode {
 	case "messenger":
+		// Skip bot reply if admin replied after bot's last send.
+		if ch.adminRepliedAfterBot(msg.ChatID) {
+			slog.Info("facebook: skipping bot reply (admin already responded)",
+				"chat_id", msg.ChatID)
+			return nil
+		}
+
 		text := FormatForMessenger(msg.Content)
 		parts := splitMessage(text, messengerMaxChars)
 		for _, part := range parts {
@@ -170,6 +210,8 @@ func (ch *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 				return err
 			}
 		}
+		// Record that bot sent a reply (to distinguish from admin in future checks).
+		ch.botSentAt.Store(msg.ChatID, time.Now())
 
 	default: // "comment"
 		commentID := msg.Metadata["reply_to_comment_id"]

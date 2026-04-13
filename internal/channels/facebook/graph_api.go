@@ -168,6 +168,43 @@ func (g *GraphClient) SendMessage(ctx context.Context, recipientID, message stri
 	return result.MessageID, nil
 }
 
+// LastPageMessageTime returns the timestamp of the most recent message sent by
+// the page in a conversation with recipientID. Returns zero time if none found.
+func (g *GraphClient) LastPageMessageTime(ctx context.Context, recipientID string) time.Time {
+	path := fmt.Sprintf("/me/conversations?user_id=%s&fields=messages.limit(3){from,created_time}", recipientID)
+	data, err := g.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		slog.Debug("facebook: last message check failed", "recipient", recipientID, "error", err)
+		return time.Time{}
+	}
+	var result struct {
+		Data []struct {
+			Messages struct {
+				Data []struct {
+					From struct {
+						ID string `json:"id"`
+					} `json:"from"`
+					CreatedTime string `json:"created_time"`
+				} `json:"data"`
+			} `json:"messages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || len(result.Data) == 0 {
+		return time.Time{}
+	}
+	// Find the most recent message from the page
+	for _, msg := range result.Data[0].Messages.Data {
+		if msg.From.ID == g.pageID {
+			t, err := time.Parse(time.RFC3339, msg.CreatedTime+"+0000")
+			if err != nil {
+				t, _ = time.Parse("2006-01-02T15:04:05+0000", msg.CreatedTime)
+			}
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // SendTypingOn sends a typing indicator to the recipient (auto-off after 3s).
 func (g *GraphClient) SendTypingOn(ctx context.Context, recipientID string) error {
 	body := map[string]any{
