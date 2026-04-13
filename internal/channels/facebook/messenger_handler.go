@@ -55,12 +55,7 @@ func (ch *Channel) handleMessagingEvent(entry WebhookEntry, event MessagingEvent
 	// Check if admin already replied to this conversation recently.
 	senderID := event.Sender.ID
 	if ch.adminRepliedRecently(senderID, time.Now()) {
-		if val, ok := ch.adminReplied.Load(senderID); ok {
-			if repliedAt, ok := val.(time.Time); ok {
-				slog.Info("facebook: skipping auto-reply (admin replied recently)",
-					"chat_id", senderID, "admin_replied_at", repliedAt.Format(time.RFC3339))
-			}
-		}
+		slog.Info("facebook: skipping auto-reply (admin replied recently)", "chat_id", senderID)
 		return
 	}
 

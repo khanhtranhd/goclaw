@@ -25,7 +25,7 @@ const (
 	dedupTTL           = 24 * time.Hour  // matches Facebook's max retry window
 	dedupCleanEvery    = 5 * time.Minute // how often to evict stale dedup entries
 	adminReplyCooldown = 5 * time.Minute
-	botEchoWindow      = 60 * time.Second
+	botEchoWindow      = 15 * time.Second
 )
 
 // Channel implements channels.Channel and channels.WebhookChannel for Facebook Fanpage.
@@ -286,7 +286,8 @@ func (ch *Channel) sendFirstInbox(ctx context.Context, senderID string) {
 	}
 }
 
-// runDedupCleaner evicts dedup entries older than dedupTTL every dedupCleanEvery.
+// runDedupCleaner evicts stale entries from dedup, adminReplied, and botSentAt
+// maps every dedupCleanEvery to prevent unbounded memory growth.
 func (ch *Channel) runDedupCleaner() {
 	ticker := time.NewTicker(dedupCleanEvery)
 	defer ticker.Stop()
@@ -299,6 +300,18 @@ func (ch *Channel) runDedupCleaner() {
 			ch.dedup.Range(func(k, v any) bool {
 				if t, ok := v.(time.Time); ok && now.Sub(t) > dedupTTL {
 					ch.dedup.Delete(k)
+				}
+				return true
+			})
+			ch.adminReplied.Range(func(k, v any) bool {
+				if t, ok := v.(time.Time); ok && now.Sub(t) > adminReplyCooldown {
+					ch.adminReplied.Delete(k)
+				}
+				return true
+			})
+			ch.botSentAt.Range(func(k, v any) bool {
+				if t, ok := v.(time.Time); ok && now.Sub(t) > botEchoWindow {
+					ch.botSentAt.Delete(k)
 				}
 				return true
 			})

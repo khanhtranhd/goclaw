@@ -346,6 +346,10 @@ func extractPayloadString(payload any, key string) string {
 	return ""
 }
 
+// routingMetaKeys enumerates the metadata keys that must survive the hop from
+// inbound RunContext.Metadata into outbound OutboundMessage.Metadata so that
+// replies, block replies, retries, and placeholder updates all land in the
+// correct thread / topic / subgroup routing bucket on each channel.
 var routingMetaKeys = []string{
 	"message_thread_id",      // telegram forum topics
 	"local_key",              // composite chat-id suffix
@@ -357,6 +361,8 @@ var routingMetaKeys = []string{
 	"reply_to_comment_id",    // facebook comment reply target
 }
 
+// copyRoutingMeta copies channel routing metadata from RunContext.Metadata
+// into a new map suitable for outbound messages.
 func copyRoutingMeta(src map[string]string) map[string]string {
 	out := make(map[string]string)
 	for _, k := range routingMetaKeys {
