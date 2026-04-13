@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const adminReplyCooldown = 5 * time.Minute
-
 // handleMessagingEvent processes a Messenger inbox event.
 func (ch *Channel) handleMessagingEvent(entry WebhookEntry, event MessagingEvent) {
 	// Feature gate.
@@ -25,7 +23,12 @@ func (ch *Channel) handleMessagingEvent(entry WebhookEntry, event MessagingEvent
 	// conversation during the cooldown window.
 	if event.Sender.ID == ch.pageID {
 		if event.Recipient.ID != "" {
-			ch.adminReplied.Store(event.Recipient.ID, time.Now())
+			eventAt := messagingEventTime(event.Timestamp)
+			if ch.isBotEcho(event.Recipient.ID, eventAt) {
+				slog.Debug("facebook: bot echo ignored", "chat_id", event.Recipient.ID)
+				return
+			}
+			ch.adminReplied.Store(event.Recipient.ID, eventAt)
 			slog.Debug("facebook: admin reply tracked", "chat_id", event.Recipient.ID)
 		}
 		return
@@ -51,13 +54,14 @@ func (ch *Channel) handleMessagingEvent(entry WebhookEntry, event MessagingEvent
 
 	// Check if admin already replied to this conversation recently.
 	senderID := event.Sender.ID
-	if val, ok := ch.adminReplied.Load(senderID); ok {
-		if repliedAt, ok := val.(time.Time); ok && time.Since(repliedAt) < adminReplyCooldown {
-			slog.Info("facebook: skipping auto-reply (admin replied recently)",
-				"chat_id", senderID, "admin_replied_at", repliedAt.Format(time.RFC3339))
-			return
+	if ch.adminRepliedRecently(senderID, time.Now()) {
+		if val, ok := ch.adminReplied.Load(senderID); ok {
+			if repliedAt, ok := val.(time.Time); ok {
+				slog.Info("facebook: skipping auto-reply (admin replied recently)",
+					"chat_id", senderID, "admin_replied_at", repliedAt.Format(time.RFC3339))
+			}
 		}
-		ch.adminReplied.Delete(senderID)
+		return
 	}
 
 	// Extract text content.
@@ -86,4 +90,15 @@ func (ch *Channel) handleMessagingEvent(entry WebhookEntry, event MessagingEvent
 	}
 
 	ch.HandleMessage(senderID, chatID, content, nil, metadata, "direct")
+}
+
+func messagingEventTime(ts int64) time.Time {
+	switch {
+	case ts > 1_000_000_000_000:
+		return time.UnixMilli(ts)
+	case ts > 0:
+		return time.Unix(ts, 0)
+	default:
+		return time.Now()
+	}
 }
