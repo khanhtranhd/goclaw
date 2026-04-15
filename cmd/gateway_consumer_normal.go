@@ -415,10 +415,19 @@ func processNormalMessage(
 				return
 			}
 			slog.Error("inbound: agent run failed", "error", outcome.Err, "channel", channel)
+			// Suppress technical error messages for external channels (Facebook, Telegram, etc.)
+			// — end users should not see internal error details.
+			errContent := formatAgentError(outcome.Err)
+			if deps.ChannelMgr != nil {
+				if ct := deps.ChannelMgr.ChannelTypeForName(channel); isExternalChannel(ct) {
+					slog.Info("inbound: suppressed error for external channel", "channel", channel, "type", ct)
+					errContent = ""
+				}
+			}
 			deps.MsgBus.PublishOutbound(bus.OutboundMessage{
 				Channel:  channel,
 				ChatID:   chatID,
-				Content:  formatAgentError(outcome.Err),
+				Content:  errContent,
 				Metadata: meta,
 			})
 			return

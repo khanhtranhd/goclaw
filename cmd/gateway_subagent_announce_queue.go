@@ -182,10 +182,15 @@ func processSubagentAnnounceLoop(
 		if outcome.Err != nil {
 			if !errors.Is(outcome.Err, context.Canceled) {
 				slog.Error("subagent announce: lead run failed", "error", outcome.Err, "batch_size", len(entries))
+				errContent := formatAgentError(outcome.Err)
+				if isExternalChannel(r.OrigChannelType) {
+					slog.Info("subagent announce: suppressed error for external channel", "channel", r.OrigChannel, "type", r.OrigChannelType)
+					errContent = ""
+				}
 				msgBus.PublishOutbound(bus.OutboundMessage{
 					Channel:  r.OrigChannel,
 					ChatID:   r.OrigChatID,
-					Content:  formatAgentError(outcome.Err),
+					Content:  errContent,
 					Metadata: r.OutMeta,
 				})
 			}

@@ -89,6 +89,16 @@ func isMessageFormatError(lower string) bool {
 	)
 }
 
+// isExternalChannel returns true for channel types that serve end users
+// (e.g. Facebook, Telegram) where internal error messages should not be exposed.
+func isExternalChannel(channelType string) bool {
+	switch strings.ToLower(channelType) {
+	case "facebook", "telegram", "discord", "zalo", "whatsapp", "feishu", "line":
+		return true
+	}
+	return false
+}
+
 // containsAny returns true if s contains any of the given substrings.
 func containsAny(s string, substrs ...string) bool {
 	for _, sub := range substrs {
