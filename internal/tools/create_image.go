@@ -216,11 +216,21 @@ func (t *CreateImageTool) callImageGenAPI(ctx context.Context, apiKey, apiBase, 
 
 // callStandardImageGenAPI uses the /images/generations endpoint (OpenAI and compatible providers).
 func (t *CreateImageTool) callStandardImageGenAPI(ctx context.Context, apiKey, apiBase, model, prompt string, params map[string]any) ([]byte, *providers.Usage, error) {
+	// Internal/routing keys not forwarded to the API.
+	skipKeys := map[string]bool{
+		"prompt": true, "aspect_ratio": true, "_provider_type": true,
+	}
 	body := map[string]any{
 		"model":           model,
 		"prompt":          prompt,
 		"n":               1,
 		"response_format": "b64_json",
+	}
+	// Forward extra provider-specific params from chain config (e.g. size, quality, output_format).
+	for k, v := range params {
+		if !skipKeys[k] {
+			body[k] = v
+		}
 	}
 
 	jsonBody, err := json.Marshal(body)
